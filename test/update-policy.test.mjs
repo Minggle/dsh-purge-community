@@ -236,3 +236,31 @@ test("an empty githubToken keeps the stored secret; clearGithubToken is the only
     assert.equal("clearGithubToken" in readChannel(f), false, "the control flag itself is never persisted");
   } finally { f.done(); }
 });
+
+test("a legacy same-file layout migrates its channel credentials exactly once", () => {
+  const f = tempHome(); try {
+    // ≤1.6.61 把 proxyUrl / githubToken 和 autoCheck 等存在同一个文件里。
+    fs.mkdirSync(path.join(f.home, "dsh-purge"), { recursive: true });
+    fs.writeFileSync(f.prefs, JSON.stringify({
+      autoCheck: false,
+      autoInstall: false,
+      intervalHours: 12,
+      proxyUrl: "socks5://127.0.0.1:7891",
+      githubToken: "ghp_legacytoken000000000000000000000000",
+    }));
+    assert.equal(fs.existsSync(f.channel), false, "no channel file before the first read");
+    const first = preferences(f.home);
+    assert.equal(first.proxyUrl, "socks5://127.0.0.1:7891", "legacy proxy survives the layout change");
+    assert.equal(first.githubToken, "ghp_legacytoken000000000000000000000000", "legacy token survives too");
+    assert.equal(first.intervalHours, 12, "behaviour preferences are untouched");
+    assert.equal(first.autoCheck, false);
+    assert.equal(fs.existsSync(f.channel), true, "migration writes the dedicated file once");
+    assert.deepEqual(updateEnv(f.home), {
+      PURGE_HTTPS_PROXY: "socks5://127.0.0.1:7891",
+      GITHUB_TOKEN: "ghp_legacytoken000000000000000000000000",
+    });
+    // 迁移后只认新文件：改旧文件不再影响通道。
+    fs.writeFileSync(f.prefs, JSON.stringify({ autoCheck: true, autoInstall: false, intervalHours: 6, proxyUrl: "http://127.0.0.1:9999" }));
+    assert.equal(preferences(f.home).proxyUrl, "socks5://127.0.0.1:7891", "the legacy file is no longer read for the channel");
+  } finally { f.done(); }
+});
